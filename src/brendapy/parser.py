@@ -1,5 +1,6 @@
-"""Module for parsing the BRENDA ENZYME information from flat file.
-
+# -*- coding: utf-8 -*-
+"""
+Module for parsing the BRENDA ENZYME information from flat file.
 The following information is available:
 
     AC    activating compound
@@ -47,24 +48,25 @@ The following information is available:
     TR    temperature range
     TS    temperature stability
 """
+import os
 import re
+import logging
 from collections import OrderedDict, defaultdict
-from typing import Dict, List
+from pprint import pprint
 
 from brendapy import utils
-from brendapy.log import get_logger
 from brendapy.settings import BRENDA_FILE
-from brendapy.substances import CHEBI
 from brendapy.taxonomy import Taxonomy
-from brendapy.tissues import BTO
+from brendapy.tissues import get_bto
+from brendapy.substances import get_substances
 
+# TAXONOMY = Taxonomy()
 
-logger = get_logger(__name__)
-TAXONOMY = Taxonomy()
+deprecated_id_re = re.compile("EC\s+(\d+\.\d+\.\d+\.\d+)")
 
 
 class BrendaParser(object):
-    """Parser for BRENDA information.
+    """ Parser for BRENDA information.
 
     The parser reads the BRENDA flat file into the
     parts for the ec numbers. Via the BrendaParser the
@@ -72,54 +74,21 @@ class BrendaParser(object):
     """
 
     BRENDA_KEYS = [
-        "AC",
-        "AP",
-        "CF",
-        "CL",
-        "CR",
-        "EN",
-        "EXP",
-        "GI",
-        "GS",
-        "IC50",
-        "ID",
-        "IN",
-        "KKM",
-        "KI",
-        "KM",
-        "LO",
-        "ME",
-        "MW",
-        "NSP",
-        "OS",
-        "OSS",
-        "PHO",
-        "PHR",
-        "PHS",
-        "PI",
-        "PM",
-        "PR",
-        "PU",
-        "RE",
-        "RF",
-        "REN",
-        "RN",
-        "RT",
-        "SA",
-        "SN",
-        "SP",
-        "SS",
-        "ST",
-        "SU",
-        "SY",
-        "TN",
-        "TO",
-        "TR",
-        "TS",
+        "AC", "AP", "CF", "CL", "CR", "EN", "EXP", "GI", "GS", "IC50",
+        "ID", "IN", "KKM", "KI", "KM", "LO", "ME", "MW", "NSP", "OS",
+        "OSS", "PHO", "PHR", "PHS", "PI", "PM", "PR", "PU", "RE", "RF",
+        "REN", "RN", "RT", "SA", "SN", "SP", "SS", "ST", "SU", "SY", "TN",
+        "TO", "TR", "TS"
     ]
+
+    # Gencovery: replace PATTERN_ORGANISM
+    # PATTERN_RF = re.compile(r"^<(\d+?)> (.+) {Pubmed:\s*(\d*)\s*}")
+    # PATTERN_ALL = re.compile(r"^#([,\d\s]+?)#(.+)<([,\d\s]+)>")
+    # PATTERN_VALUE = re.compile(r"^([\d\.]+)\s+\{(.+)\}")
+
     PATTERN_RF = re.compile(r"^<(\d+?)> (.+) {Pubmed:\s*(\d*)\s*}")
     PATTERN_ALL = re.compile(r"^#([,\d\s]+?)#(.+)<([,\d\s]+)>")
-    PATTERN_VALUE = re.compile(r"^([\d\.]+)\s+\{(.+)\}")
+    PATTERN_VALUE = re.compile(r"^([\d\.\-]+)\s+\{(.+)\}")
 
     UNITS = {
         "KM": "mM",
@@ -127,11 +96,12 @@ class BrendaParser(object):
         "TN": "1/s",
         "IC50": "mM",
         "KKM": "1/mM/s",
-        "SA": "µmol/min/mg",
+        "SA": "µmol/min/mg"
     }
+    CHEBI = None
 
     def __init__(self, brenda_file=BRENDA_FILE):
-        """Initialize parser and parse BRENDA file.
+        """ Initialize parser and parse BRENDA file.
 
         :param brenda_file: BRENDA text file
         """
@@ -139,8 +109,8 @@ class BrendaParser(object):
         self.ec_text = BrendaParser.parse_entry_strings(self.brenda_file)
         self.ec_data = OrderedDict()  # only parse on demand
 
-    def keys(self) -> List:
-        """Available ec keys.
+    def keys(self):
+        """ Available ec keys.
 
         Information for these EC numbers is available in the
         parser object.
@@ -151,19 +121,19 @@ class BrendaParser(object):
 
     @staticmethod
     def parse_entry_strings(filename):
-        """Read the string entries from BRENDA file.
+        """ Reads the string entries from BRENDA file.
 
         :param filename: BRENDA database download
         :return: dict (ec, brenda_info)
         """
-        logger.info(f"`parse_entry_strings` from `{filename}`")
+        logging.info(f"`parse_entry_strings` from `{filename}`")
         ec_data = OrderedDict()
 
         in_entry = False
         data_lines = []
 
         # read BRENDA file
-        with open(filename, "r", encoding="utf-8") as bf:
+        with open(filename, 'r', encoding="utf-8") as bf:
             for line in bf.readlines():
                 if line.startswith("*") or len(line) == 0:
                     continue
@@ -180,7 +150,7 @@ class BrendaParser(object):
                 if in_entry and line.startswith("///"):
                     in_entry = False
                     entry = "".join(data_lines)
-                    entry.replace("\xef\xbf\xbd", " ")
+                    entry.replace('\xef\xbf\xbd', " ")
                     # store entry
                     ec_data[ec] = entry
                     data_lines = []
@@ -189,7 +159,7 @@ class BrendaParser(object):
 
     @utils.timeit
     def parse_info_dicts(self):
-        """Parse all info dicts.
+        """ Parses all info dicts.
 
         This takes around ~15s and prepares all proteins.
         """
@@ -199,9 +169,10 @@ class BrendaParser(object):
         return d
 
     @staticmethod
-    def _parse_info_dict(ec: str, ec_str):
-        """Parse info dictionary."""
-
+    def _parse_info_dict(ec, ec_str):
+        """
+        :return:
+        """
         def parse_bid_item(line):
             tokens = line.split("\t")
             bid = tokens[0].strip()
@@ -238,9 +209,7 @@ class BrendaParser(object):
                     if bid in BrendaParser.BRENDA_KEYS:
                         in_item = True
                     else:
-                        logger.error(
-                            f"{ec}_{bid}: BRENDA key not supported in line: `{line}`"
-                        )
+                        # logging.error(f"{ec}_{bid}: BRENDA key not supported in line: `{line}`")
                         item = None
 
                 # store last entry
@@ -256,14 +225,18 @@ class BrendaParser(object):
 
         return results
 
-    @staticmethod
-    def _store_item(results, bid, item, ec=None):
-        """Store parsed item for bid.
+    @classmethod
+    def _store_item(cls, results, bid, item, ec=None):
+        """ Store parsed item for bid.
 
         :param bid:
         :param item:
         :return:
         """
+
+        if not cls.CHEBI:
+            cls.CHEBI = get_substances()
+
         if bid == "ID":
             results[bid] = item
         elif bid in {"RN", "RE", "RT", "SN"}:
@@ -277,26 +250,27 @@ class BrendaParser(object):
                 rid, info, pubmed = match.group(1), match.group(2), match.group(3)
                 rid = int(rid)  # integer keys for all references
                 results[bid][rid] = {
-                    "info": info,
+                    'info': info,
                 }
                 if pubmed and len(pubmed) > 0:
                     pubmed = int(pubmed)  # integer keys for all pubmeds
-                    results[bid][rid]["pubmed"] = pubmed
+                    results[bid][rid]['pubmed'] = pubmed
             else:
-                logger.error(f"Reference could not be parsed: `{item}`")
+                # logging.error(f"Reference could not be parsed: `{item}`")
+                pass
         # everything else
         else:
             match = BrendaParser.PATTERN_ALL.match(item)
             if match:
                 ids, data_all, refs = match.group(1), match.group(2), match.group(3)
-                ids = ids.replace(" ", ",")  # fix the missing comma in ids
-                ids = [int(token) for token in ids.split(",")]
-                refs = refs.replace(" ", ",")  # fix the missing comma in refs
+                ids = ids.replace(' ', ",")  # fix the missing comma in ids
+                ids = [int(token) for token in ids.split(',')]
+                refs = refs.replace(' ', ",")  # fix the missing comma in refs
 
                 # get additional information
                 comment = None
 
-                tokens = data_all.split("(#")
+                tokens = data_all.split('(#')
                 if len(tokens) == 1:
                     data = tokens[0]
                 elif len(tokens) == 2:
@@ -304,51 +278,53 @@ class BrendaParser(object):
                     comment = "(#" + tokens[1].strip()
                     comment = comment[1:-1]
                 else:
-                    logger.error(f"comment could not be parsed: '{data_all}'")
+                    # logging.error(f"comment could not be parsed: '{data_all}'")
+                    pass
 
                 # check data
                 if len(data) == 0:
-                    logger.warning(
-                        f"{ec}_{bid}: empty information not stored: '{data_all}'"
-                    )
+                    # logging.warning(f"{ec}_{bid}: empty information not stored: '{data_all}'")
+                    pass
                 elif data == "more":
-                    logger.info(f"{ec}_{bid}: 'more' data not stored: {data_all}")
+                    # logging.info(f"{ec}_{bid}: 'more' data not stored: {data_all}")
                     return
 
                 # store info as dict
                 info = {
-                    "data": data.strip(),
-                    "refs": [int(token) for token in refs.split(",")],
+                    'data': data.strip(),
+                    'refs': [int(token) for token in refs.split(',')]
                 }
                 if comment:
-                    info["comment"] = comment
+                    info['comment'] = comment
 
                 if bid in BrendaParser.UNITS:
                     info["units"] = BrendaParser.UNITS[bid]
                     if data.startswith("-999"):
                         # parse value
-                        logger.info(f"{ec}_{bid}: '-999' values not parsed: {data}")
+                        # logging.info(f"{ec}_{bid}: '-999' values not parsed: {data}")
+                        pass
                     else:
                         match_s = BrendaParser.PATTERN_VALUE.match(info["data"])
                         if match_s:
-                            info["value"] = float(match_s.group(1))
+                            # info['value'] = float(match_s.group(1))
+                            info['value'] = match_s.group(1)
+
                             substrate = match_s.group(2)
-                            info["substrate"] = substrate
-                            if substrate in CHEBI:
-                                info["chebi"] = CHEBI[substrate]
+
+                            info['substrate'] = substrate
+                            if substrate in cls.CHEBI:
+                                info['chebi'] = cls.CHEBI[substrate]
                             else:
-                                logger.info(
-                                    f"Substrate not found in CHEBI: '{substrate}'"
-                                )
+                                # logging.info(f"Substrate could not be found in CHEBI: '{substrate}'")
+                                pass
                         else:
                             # trying the simple patterns without substrate
                             try:
-                                info["value"] = float(info["data"])
-                            except ValueError:
-                                logger.error(
-                                    f"data could not be converted to float: "
-                                    f"{info['data']}"
-                                )
+                                # info['value'] = float(info["data"])
+                                info['value'] = info["data"]
+                            except:
+                                # logging.error(f"data could not be converted to float: {info['data']}")
+                                pass
 
                 for pid in ids:
                     if bid == "PR":
@@ -359,10 +335,12 @@ class BrendaParser(object):
                         else:
                             results[bid][pid] = [info]
             else:
-                if bid == "SY" and item[0] != "#":
-                    logger.info(f"{ec}_{bid}: generic synonyms are not stored: {item}")
+                if bid == "SY" and item[0] != '#':
+                    # logging.info(f"{ec}_{bid}: generic synonyms are not stored: {item}")
+                    pass
                 else:
-                    logger.error(f"{ec}_{bid}: could not be parsed: `{item}`")
+                    # logging.error(f"{ec}_{bid}: could not be parsed: `{item}`")
+                    pass
 
     @staticmethod
     def _get_ec_from_line(line):
@@ -373,27 +351,76 @@ class BrendaParser(object):
         else:
             return None
 
-    def get_proteins(self, ec: str) -> Dict[int, "BrendaProtein"]:
-        """Parse all BRENDA proteins for given EC number.
+    def get_proteins(self, ec):
+        """ Parses all BRENDA proteins for given EC number.
 
         :param ec:
         :return: OrderedDict of BRENDA proteins
         """
         # process text data for ec if not already existing
         if ec not in self.ec_data:
-            self.ec_data[ec] = BrendaParser._parse_info_dict(
-                ec, ec_str=self.ec_text[ec]
-            )
+            self.ec_data[ec] = BrendaParser._parse_info_dict(ec, ec_str=self.ec_text[ec])
 
         ec_data = self.ec_data[ec]
         proteins = {}
-        for key in ec_data["PR"].keys():
-            proteins[key] = BrendaProtein(ec=ec, key=key, data=ec_data)
+
+        is_deprecated_ec = not ec_data['PR']
+        if is_deprecated_ec:
+            pass
+        else:
+            for key in ec_data['PR'].keys():
+                proteins[key] = BrendaProtein(ec=ec, key=key, data=ec_data)
+
         return proteins
+
+    def get_all_proteins(self, ec):
+        """ Parses all BRENDA proteins for given EC number.
+
+        :param ec:
+        :return: OrderedDict of BRENDA proteins
+        """
+        # process text data for ec if not already existing
+        if ec not in self.ec_data:
+            self.ec_data[ec] = BrendaParser._parse_info_dict(ec, ec_str=self.ec_text[ec])
+
+        ec_data = self.ec_data[ec]
+        deprecated_ec = {}
+        proteins = {}
+
+        def is_deprecated(_id):
+            return ("transferred" in _id) or ("deleted" in _id)
+
+        _id = ec_data['ID']
+        if is_deprecated(_id):
+            deprecated_ec = {
+                "old_ec": ec,
+                "new_ec": [],
+                "data": {
+                    'ID': str(_id),
+                    'RN': str(ec_data.get("RN", "")),
+                    "reason": "",
+                }
+            }
+
+            new_ec = deprecated_id_re.findall(_id)
+            for n_ec in new_ec:
+                deprecated_ec["new_ec"].append(n_ec)
+
+            if "transferred" in _id:
+                deprecated_ec["data"]["reason"] = "transferred"
+
+            if "deleted" in _id:
+                deprecated_ec["data"]["reason"] = "deleted"
+
+        else:
+            for key in ec_data['PR'].keys():
+                proteins[key] = BrendaProtein(ec=ec, key=key, data=ec_data)
+
+        return proteins, deprecated_ec
 
 
 class BrendaProtein(object):
-    """Stores BRENDA information for a protein entry.
+    """ Stores BRENDA information for a protein entry.
 
     Every protein belongs to a single EC number. For a single
     EC number multiple proteins exist corresponding to different
@@ -402,20 +429,26 @@ class BrendaProtein(object):
     This class provides helper properties which allows to access
     the data based on the BRENDA keys in the flat file.
     """
-
-    PATTERN_ORGANISM = re.compile(r"^(\w+)\s([\w\.]+)")
+    # Gencovery: replace PATTERN_ORGANISM
+    # PATTERN_ORGANISM = re.compile(r"^(\w+)\s([\w\.]+)")
+    PATTERN_ORGANISM = re.compile(r"^([a-zA-Z0-9\-]+)\s([\w\.]+)")
     PATTERN_UNIPROT = re.compile(
-        r"([A-N,R-Z][0-9]([A-Z][A-Z, 0-9][A-Z, 0-9][0-9]){1,2})|([O,P,Q][0-9][A-Z, 0-9][A-Z, 0-9][A-Z, 0-9][0-9])(\.\d+)?"  # noqa: E501
-    )
+        r"([A-N,R-Z][0-9]([A-Z][A-Z, 0-9][A-Z, 0-9][0-9]){1,2})|([O,P,Q][0-9][A-Z, 0-9][A-Z, 0-9][A-Z, 0-9][0-9])(\.\d+)?")
+    BTO = None
 
     def __init__(self, ec, key, data):
-        """Construct protein object.
+        """ Construct protein object.
 
         :param ec: EC number
         :param key: integer protein key (BRENDA key for protein)
         :param data: data dictionary for the complete ec number
         """
-        protein_info = data["PR"][key]["data"]
+        # BTO
+        cls = type(self)
+        if not cls.BTO:
+            cls.BTO = get_bto()
+
+        protein_info = data['PR'][key]['data']
 
         # organism
         match_organism = BrendaProtein.PATTERN_ORGANISM.match(protein_info)
@@ -423,10 +456,11 @@ class BrendaProtein(object):
             organism = f"{match_organism.group(1)} {match_organism.group(2)}"
         else:
             organism = protein_info
-            logger.warning(f"Organism could not be parsed from: '{protein_info}'")
+            # logging.warning(f"Organism could not be parsed from: '{protein_info}'")
 
         # taxonomy
-        taxonomy = TAXONOMY.get_taxonomy_id(organism)
+        t = Taxonomy()
+        taxonomy = t.get_taxonomy_id(organism)
 
         # uniprot
         uniprot = None
@@ -436,16 +470,14 @@ class BrendaProtein(object):
                 uniprot = token
                 break
 
-        self.data = OrderedDict(
-            [
-                ("protein_id", key),
-                ("ec", ec),
-                ("organism", organism),
-                ("taxonomy", taxonomy),
-                ("uniprot", uniprot),
-            ]
-        )
-        reference_ids = set(data["PR"][key]["refs"])
+        self.data = OrderedDict([
+            ('protein_id', key),
+            ('ec', ec),
+            ('organism', organism),
+            ('taxonomy', taxonomy),
+            ('uniprot', uniprot),
+        ])
+        reference_ids = set(data['PR'][key]['refs'])
 
         # add all fields
         for bid in BrendaParser.BRENDA_KEYS:
@@ -462,293 +494,292 @@ class BrendaProtein(object):
                 if info:
                     self.data[bid] = info
                     # for the list items collect additional references
-                    if isinstance(info, (list,)):
+                    if isinstance(info, (list, )):
                         for item in info:
                             # collect additional references
-                            reference_ids.update(item["refs"])
+                            reference_ids.update(item['refs'])
 
-        self.data["references"] = {
-            ref_id: data["RF"].get(ref_id, {}) for ref_id in reference_ids
-        }
+        self.data['references'] = {ref_id: data['RF'].get(ref_id, {}) for ref_id in reference_ids}
 
         # map tissues on Brenda Tissue Ontology
         tissues = set()
+        cls = type(self)
         if self.ST:
             for item in self.ST:
-                tissue = item["data"]
-                bto = BTO.get(tissue, None)
+                tissue = item['data']
+                bto = cls.BTO.get(tissue, None)
                 if bto:
-                    item["bto"] = bto
+                    item['bto'] = bto
                     tissues.add(bto)
                 else:
-                    logger.error(
-                        f"Source/Tissue not found in Brenda Tissue Ontology (BTO): "
-                        f"'{tissue}'"
-                    )
+                    # logging.error(f"Source/Tissue not found in Brenda Tissue Ontology (BTO): '{tissue}'")
+                    pass
         self.data["tissues"] = tissues
 
     @property
     def protein_id(self):
-        """BRENDA Protein id.
+        """"BRENDA Protein id.
 
         This is the integer used in the BRENDA flatfile to
         map to individual protein entries.
 
         :return: int protein id
         """
-        return self.data["protein_id"]
+        return self.data['protein_id']
 
     @property
     def ec(self):
-        """EC."""
-        return self.data["ec"]
+        return self.data['ec']
 
     @property
     def organism(self):
-        """Organism."""
-        return self.data["organism"]
+        return self.data['organism']
 
     @property
     def taxonomy(self):
-        """NCBI Taxonomy id.
+        """ NCBI Taxonomy id
 
         :return: NCBI taxonomy id, None if organism could not be mapped
         """
-        return self.data["taxonomy"]
+        return self.data['taxonomy']
 
     @property
     def uniprot(self):
-        """UniProt/SwissProt id.
+        """ UniProt/SwissProt id.
 
         :return: uniprot id, None if no information available for protein entry
         """
-        return self.data["uniprot"]
+        return self.data['uniprot']
 
     @property
     def tissues(self):
-        """BRENDA Tissue Ontology (BTO) tissue ids.
-
+        """ BRENDA Tissue Ontology (BTO) tissue ids
         :return: set of bto terms, empty set if no bto terms exist
         """
-        return self.data["tissues"]
+        return self.data['tissues']
 
     @property
     def references(self):
-        """References."""  # noqa: D401
-        return self.data["references"]
+        return self.data['references']
 
     def __str__(self):
-        """String representation."""  # noqa: D401
+        """String representation. """
         from pprint import pformat
-
         return pformat(self.data)
 
     @property
     def AC(self):
-        """Activating compound."""
+        """activating compound
+        :return: list, None if no data exists
+        """
         return self.data.get("AC", None)
 
     @property
     def AP(self):
-        """Application."""
+        """application"""
         return self.data.get("AP", None)
 
     @property
     def CF(self):
-        """Cofactor."""
+        """cofactor"""
         return self.data.get("CF", None)
 
     @property
     def CL(self):
-        """Cloned."""
+        """cloned"""
         return self.data.get("CL", None)
 
     @property
     def CR(self):
-        """Crystallization."""
+        """crystallization"""
         return self.data.get("CR", None)
 
     @property
     def EN(self):
-        """Engineering."""
+        """engineering"""
         return self.data.get("EN", None)
 
     @property
     def EXP(self):
-        """Expression."""
+        """expression"""
         return self.data.get("EXP", None)
 
     @property
     def GI(self):
-        """General information on enzyme."""
+        """general information on enzyme"""
         return self.data.get("GI", None)
 
     @property
     def GS(self):
-        """General stability."""
+        """general stability"""
         return self.data.get("GS", None)
 
     @property
     def IC50(self):
-        """IC-50 Value."""
+        """IC-50 Value"""
         return self.data.get("IC50", None)
 
     @property
     def ID(self):
-        """EC-class."""
+        """EC-class"""
         return self.data.get("ID", None)
 
     @property
     def IN(self):
-        """Inhibitors."""
+        """inhibitors"""
         return self.data.get("IN", None)
 
     @property
     def KKM(self):
-        """Kcat/KM-Value substrate in {...}."""
+        """Kcat/KM-Value substrate in {...}"""
         return self.data.get("KKM", None)
 
     @property
     def KI(self):
-        """Ki-value inhibitor in {...}."""
+        """Ki-value inhibitor in {...}"""
         return self.data.get("KI", None)
 
     @property
     def KM(self):
-        """KM-value substrate in {...}."""
+        """KM-value substrate in {...}"""
         return self.data.get("KM", None)
 
     @property
     def LO(self):
-        """Localization."""
+        """localization"""
         return self.data.get("LO", None)
 
     @property
     def ME(self):
-        """Metals/ions."""
+        """metals/ions"""
         return self.data.get("ME", None)
 
     @property
     def MW(self):
-        """Molecular weight."""
+        """molecular weight"""
         return self.data.get("MW", None)
 
     @property
     def NSP(self):
-        """Natural substrates/products reversibilty information in {...}."""
+        """natural substrates/products reversibilty information in {...}"""
         return self.data.get("NSP", None)
 
     @property
     def OS(self):
-        """Oxygen stability."""
+        """oxygen stability"""
         return self.data.get("OS", None)
 
     @property
     def OSS(self):
-        """Organic solvent stability."""
+        """organic solvent stability"""
         return self.data.get("OSS", None)
 
     @property
     def PHO(self):
-        """PH-optimum."""
+        """pH-optimum"""
         return self.data.get("PHO", None)
 
     @property
     def PHR(self):
-        """PH-range."""
+        """pH-range"""
         return self.data.get("PHR", None)
 
     @property
     def PHS(self):
-        """PH stability."""
+        """pH stability"""
         return self.data.get("PHS", None)
 
     @property
     def PI(self):
-        """Isoelectric point."""
+        """isoelectric point"""
         return self.data.get("PI", None)
 
     @property
     def PM(self):
-        """Posttranslation modification."""
+        """posttranslation modification"""
         return self.data.get("PM", None)
 
     @property
     def PU(self):
-        """Purification."""
+        """purification"""
         return self.data.get("PU", None)
 
     @property
     def RE(self):
-        """Reaction catalyzed."""
+        """reaction catalyzed"""
         return self.data.get("RE", None)
 
     @property
     def REN(self):
-        """Renatured."""
+        """renatured"""
         return self.data.get("REN", None)
 
     @property
     def RN(self):
-        """Accepted name (IUPAC)."""  # noqa: D401
+        """accepted name (IUPAC)"""
         return self.data.get("RN", None)
 
     @property
     def RT(self):
-        """Reaction type."""
+        """reaction type"""
         return self.data.get("RT", None)
 
     @property
     def SA(self):
-        """Specific activity."""
+        """specific activity"""
         return self.data.get("SA", None)
 
     @property
     def SN(self):
-        """Synonyms."""
+        """synonyms"""
         return self.data.get("SN", None)
 
     @property
     def SP(self):
-        """Substrates/products reversibilty information in {...}."""
+        """substrates/products    reversibilty information in {...}"""
         return self.data.get("SP", None)
 
     @property
     def SS(self):
-        """Storage stability."""
+        """storage stability"""
+        return self.data.get("SS", None)
+
+    @property
+    def SS(self):
+        """storage stability"""
         return self.data.get("SS", None)
 
     @property
     def ST(self):
-        """Source/tissue."""
+        """source/tissue"""
         return self.data.get("ST", None)
 
     @property
     def SU(self):
-        """Subunits."""
+        """subunits"""
         return self.data.get("SU", None)
 
     @property
     def SY(self):
-        """Systematic name."""
+        """systematic name"""
         return self.data.get("SY", None)
 
     @property
     def TN(self):
-        """Turnover number substrate in {...}."""
+        """turnover number    substrate in {...}"""
         return self.data.get("TN", None)
 
     @property
     def TO(self):
-        """Temperature optimum."""
+        """temperature optimum"""
         return self.data.get("TO", None)
 
     @property
     def TR(self):
-        """Temperature range."""
+        """temperature range"""
         return self.data.get("TR", None)
 
     @property
     def TS(self):
-        """Temperature stability."""
+        """temperature stability"""
         return self.data.get("TS", None)
